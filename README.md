@@ -6,7 +6,17 @@ Whisper の聞き取り結果は字幕本文にしません。渡した歌詞の
 
 サンプル歌詞は、9匁「重さの置き場所」です。音源は同梱していません。
 
-## 必要なもの
+## Windows exe版（Python不要）
+
+Pythonやffmpegの環境構築が不要な、ドラッグ＆ドロップだけで使えるexe版を配布しています。
+
+**[Releasesからダウンロード](https://github.com/sound-inspire/lyrics_to_srt/releases/latest)**
+
+zipを解凍し、歌詞テキストと音源(WAV)を `lyrics_to_srt.exe` にドラッグ＆ドロップしてください。使い方の詳細は同梱の「使い方.txt」を参照してください。初回実行時のみ、Whisperモデルのダウンロードにネット接続が必要です。
+
+ビルド方法は [packaging/BUILD.md](packaging/BUILD.md) を参照してください。
+
+## 必要なもの（ソースから使う場合）
 
 - Python 3.10 以降
 - [ffmpeg](https://ffmpeg.org/)（`ffmpeg` がコマンドとして使えること）
