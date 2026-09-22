@@ -1,0 +1,6 @@
+numpy
+torch
+stable-ts
+demucs
+soundfile
+librosa
