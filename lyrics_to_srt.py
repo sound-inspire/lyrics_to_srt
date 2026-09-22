@@ -26,6 +26,18 @@ import re, sys, os, difflib, subprocess, tempfile, shutil
 import numpy as np
 import stable_whisper
 
+# exe化(PyInstaller)されているときは、同梱した ffmpeg.exe を使う。
+# PyInstaller 6系はonedirでも実データを _internal 配下に置くため、
+# 実行フォルダ直下ではなく sys._MEIPASS（同梱データの実体）を見る。
+# 通常のPython実行時は今まで通りPATH上の ffmpeg を使う。
+FROZEN = getattr(sys, "frozen", False)
+if FROZEN:
+    _base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    _bundled = os.path.join(_base, "ffmpeg.exe")
+    FFMPEG = _bundled if os.path.exists(_bundled) else "ffmpeg"
+else:
+    FFMPEG = "ffmpeg"
+
 MODEL = "medium"
 GAP_SPLIT = 1.0   # 聞き取り区間の間にこれ以上の空白があれば間奏とみなして区切る
 LEAD = 0.5        # 区切り位置を歌い出しの少し前に置く
@@ -80,12 +92,14 @@ if stem:
 else:
     tmp = tempfile.mkdtemp(prefix="lyrics_to_srt_")
     print("ボーカル分離中（demucs）…")
-    subprocess.run([sys.executable, "-m", "demucs", "--two-stems", "vocals", "-o", tmp, mix],
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # exe化すると sys.executable がexe自身になり `-m demucs` が使えないため、
+    # サブプロセスではなくdemucsのPython APIを直接呼ぶ（挙動は同じ）。
+    from demucs.separate import main as demucs_main
+    demucs_main(["--two-stems", "vocals", "-o", tmp, mix])
     wav = os.path.join(tmp, "htdemucs", os.path.splitext(os.path.basename(mix))[0], "vocals.wav")
 
 def load16k(path):
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", "16000",
+    raw = subprocess.run([FFMPEG, "-v", "error", "-i", path, "-ac", "1", "-ar", "16000",
                           "-f", "f32le", "-"], capture_output=True, check=True).stdout
     return np.frombuffer(raw, np.float32)
 

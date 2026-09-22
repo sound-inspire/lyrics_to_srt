@@ -19,3 +19,10 @@ Thumbs.db
 desktop.ini
 .idea/
 .vscode/
+
+# exeビルド関連（配布物はGitHub Releasesへ）
+.venv-build/
+packaging/ffmpeg.exe
+packaging/build/
+packaging/dist/
+*.zip
