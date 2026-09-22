@@ -38,6 +38,14 @@ if FROZEN:
 else:
     FFMPEG = "ffmpeg"
 
+# exe化されているときは、終了直前にEnter待ちを挟む。
+# コンソールアプリをダブルクリックで起動すると、処理完了時にウィンドウごと
+# 即座に閉じてしまい、使い方やエラーメッセージが読めないため
+# （エラーで異常終了した場合もここで一時停止し、内容を読めるようにする）。
+if FROZEN:
+    import atexit
+    atexit.register(lambda: input("\n終了するには Enter を押してください…"))
+
 MODEL = "medium"
 GAP_SPLIT = 1.0   # 聞き取り区間の間にこれ以上の空白があれば間奏とみなして区切る
 LEAD = 0.5        # 区切り位置を歌い出しの少し前に置く
