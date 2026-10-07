@@ -25,6 +25,7 @@ usage:
 import re, sys, os, difflib, subprocess, tempfile, shutil
 import numpy as np
 import stable_whisper
+from line_match import pick_line, starts_mid_line
 
 # exe化(PyInstaller)されているときは、同梱した ffmpeg.exe を使う。
 # PyInstaller 6系はonedirでも実データを _internal 配下に置くため、
@@ -130,13 +131,13 @@ for a, b in zip(segs, segs[1:]):
     if b["start"] - a["end"] < GAP_SPLIT:
         continue
     head = norm(b["text"])
-    best, best_i = 0, None
-    for i in range(last_line + 1, len(lines)):
-        L = norm("".join(lines[i:i + 2]))  # 2行ぶんで照合（くり返しサビの取り違え防止）
-        sc = difflib.SequenceMatcher(None, L, head[:len(L)]).ratio()
-        if sc > best:
-            best, best_i = sc, i
+    best_i, best = pick_line(lines, head, last_line)  # くり返しの歌詞は手前の行を選ぶ
     if best_i is not None and best >= 0.5:
+        if starts_mid_line(lines[best_i], head):
+            # 間奏ではなく行の途中の息継ぎ。ここで切ると行頭が前のブロックに残り、
+            # その行の開始が区切りより前に置けなくなるので区切らない
+            print(f"区切りを見送り {b['start']:.2f}s：行{best_i+1}の途中から始まる聞き取り（類似度{best:.2f}）")
+            continue
         cuts.append((max(a["end"], b["start"] - LEAD - 1.0), best_i))
         last_line = best_i
         print(f"区切り {cuts[-1][0]:.2f}s → 行{best_i+1}「{lines[best_i]}」(類似度{best:.2f})")
