@@ -27,6 +27,14 @@ pyinstaller packaging/lyrics_to_srt.spec --distpath packaging/dist --workpath pa
 `packaging/dist/lyrics_to_srt/` にフォルダが生成されます。中に
 `lyrics_to_srt.exe`・`ffmpeg.exe`・依存DLL一式が入っています。
 
+続けて、SRT エディタ（標準ライブラリだけで動く1ファイルの exe）を同じフォルダに作ります。
+
+```bash
+pyinstaller packaging/srt_edit.spec --distpath packaging/dist/lyrics_to_srt --workpath packaging/build
+```
+
+`packaging/dist/lyrics_to_srt/srt_edit.exe` ができます（画面の `srt_editor.html` を同梱）。
+
 ## 4. 動作確認
 
 ```bash

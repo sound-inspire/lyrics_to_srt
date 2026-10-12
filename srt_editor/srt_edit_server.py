@@ -14,7 +14,21 @@ usage:
 import argparse, json, os, re, socket, sys, threading, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# exe化(PyInstaller)されているときは、同梱した srt_editor.html を sys._MEIPASS から読む
+FROZEN = getattr(sys, "frozen", False)
+HERE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))) if FROZEN \
+    else os.path.dirname(os.path.abspath(__file__))
+if FROZEN:
+    # ダブルクリック起動でエラー終了したとき、窓が即座に閉じて内容が読めないのを防ぐ
+    import atexit
+    atexit.register(lambda: input("\n終了するには Enter を押してください…"))
+# 出力をファイルへ回すと cp932 になるため、書けない文字は置き換えて続ける
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 BAD = r'[\\/:*?"<>|\r\n\t]'
 
 
