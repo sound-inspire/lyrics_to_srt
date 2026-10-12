@@ -26,3 +26,6 @@ packaging/ffmpeg.exe
 packaging/build/
 packaging/dist/
 *.zip
+packaging/build_*/
+packaging/dist_*/
+packaging/build_log.txt

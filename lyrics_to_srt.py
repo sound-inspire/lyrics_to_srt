@@ -6,7 +6,7 @@ usage:
       曲 (Vocals).wav       ボーカルステム（名前に "vocal" を含む WAV）。あれば分離を省略して速くなる
       曲.wav                ミックス音源。ステムが無ければ demucs でボーカルを分離する（約4分余計にかかる）
                             ステムと一緒に渡すと、拍の位置の測定に使う
-      出力.srt              省略時は WAV と同じ場所に 曲.srt（"(Vocals)" や "_123bpm" は名前から除く）
+      出力.srt              省略時は WAV（ミックスがあればミックス）と同じ場所に 曲.srt（"(Vocals)" や "_123bpm" は名前から除く）
 
 テンポ: WAV のファイル名に "123bpm" のように書くと使う（任意）。
   書いてあれば音声で検証し、食い違えば警告して実測値を使う。
@@ -26,6 +26,13 @@ import re, sys, os, difflib, subprocess, tempfile, shutil
 import numpy as np
 import stable_whisper
 from line_match import pick_line, starts_mid_line
+
+# 出力をファイルへ回すと cp932 になり、"⚠" などで落ちるため、書けない文字は置き換えて続ける
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 # exe化(PyInstaller)されているときは、同梱した ffmpeg.exe を使う。
 # PyInstaller 6系はonedirでも実データを _internal 配下に置くため、
@@ -82,10 +89,12 @@ for p in (stem, mix):
         break
 
 if not out:
-    base = os.path.splitext(stem or mix)[0]
+    # 本編（ミックス）があればその隣に本編の名前で出す。確認・編集は本編で行うため
+    base = os.path.splitext(mix or stem)[0]
     d, name = os.path.split(base)
-    name = re.sub(r"[\s_\-]*[\(\[（]?\s*(lead\s*)?vocals?\s*[\)\]）]?\s*$", "", name, flags=re.I) or name
+    # テンポ表記を先に除く（"曲 (Vocals)_120bpm" の "(Vocals)" が末尾に来るように）
     name = re.sub(r"[\s_\-]*\d+(?:\.\d+)?\s*bpm", "", name, flags=re.I) or name
+    name = re.sub(r"[\s_\-]*[\(\[（]?\s*(lead\s*)?vocals?\s*[\)\]）]?\s*$", "", name, flags=re.I).strip() or name
     out = os.path.join(d, name + ".srt")
 
 lines = [l.strip() for l in open(lyr, encoding="utf-8-sig")

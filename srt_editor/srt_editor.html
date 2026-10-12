@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRT エディタ</title>
+<style>
+  :root {
+    --bg: #0e0f17; --panel: #161826; --line: #2a2d42; --text: #e6e8f2; --dim: #8a8fa8;
+    --accent: #3cc8e6; --wave: #5f6a8f; --wave-hi: #9fb4e8; --cue: rgba(60,200,230,.16);
+    --cue-sel: rgba(255,196,64,.28); --cue-edge: #3cc8e6; --sel-edge: #ffc440; --play: #ff5470; --warn: #ff9d4d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.5 "Noto Sans JP", "Yu Gothic UI", "Meiryo", sans-serif; }
+  body { display: flex; flex-direction: column; overflow: auto; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  header label { color: var(--dim); }
+  #title { width: min(420px, 60vw); padding: 5px 8px; font-size: 15px; font-weight: bold;
+    background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
+  #title:focus { outline: 1px solid var(--accent); }
+  .files { color: var(--dim); font-size: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 16px;
+    border-bottom: 1px solid var(--line); }
+  select { background: #22253a; color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 2px 4px; }
+  button { background: #22253a; color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+    padding: 4px 10px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #001018; border-color: var(--accent); font-weight: bold; }
+  #clock { font-family: Consolas, monospace; font-size: 14px; min-width: 150px; }
+  #status { color: var(--dim); margin-left: auto; }
+  #status.err { color: var(--warn); }
+  #dirty { color: var(--warn); font-weight: bold; }
+  #tl { position: relative; height: clamp(120px, 26vh, 190px); overflow-x: auto; overflow-y: hidden; background: #0a0b12;
+    border-bottom: 1px solid var(--line); flex: none; }
+  #spacer { height: 1px; }
+  #cv { position: absolute; top: 0; left: 0; height: 100%; }
+  #list { flex: 1; min-height: 180px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--dim); font-weight: normal; z-index: 1; }
+  td.t { font-family: Consolas, monospace; color: var(--dim); }
+  td.txt { width: 100%; white-space: normal; }
+  tr { cursor: pointer; }
+  tr:hover td { background: #191b2b; }
+  /* 選択中の行：黄の左帯＋上下の線 ／ 再生中の行：赤の左帯＋赤い背景 */
+  tr.sel td { background: #3a2f12; box-shadow: inset 0 1px 0 var(--sel-edge), inset 0 -1px 0 var(--sel-edge); }
+  tr.sel td.n { box-shadow: inset 5px 0 0 var(--sel-edge), inset 0 1px 0 var(--sel-edge), inset 0 -1px 0 var(--sel-edge); color: var(--sel-edge); font-weight: bold; }
+  tr.now td { background: rgba(255,84,112,.22); }
+  tr.now td.txt { color: #fff; font-weight: bold; }
+  tr.now td.n { box-shadow: inset 5px 0 0 var(--play); color: var(--play); font-weight: bold; }
+  tr.now.sel td { background: #4a2a22; }
+  tr.now.sel td.n { box-shadow: inset 5px 0 0 var(--play), inset 0 1px 0 var(--sel-edge), inset 0 -1px 0 var(--sel-edge); }
+  td.n::before { content: ''; display: inline-block; width: 1.1em; }
+  tr.now td.n::before { content: '▶'; color: var(--play); }
+  td.long { color: var(--warn); }
+  td.bad { color: var(--warn); font-weight: bold; }
+  td.txt input { width: 100%; padding: 2px 4px; font: inherit; background: var(--bg); color: var(--text);
+    border: 1px solid var(--sel-edge); border-radius: 3px; }
+  .help { color: var(--dim); font-size: 11px; padding: 6px 16px; border-top: 1px solid var(--line); }
+  kbd { background: #22253a; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-family: Consolas, monospace; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.6); font-size: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <label for="title">作品名</label>
+  <input id="title" spellcheck="false" placeholder="保存名（作品名）">
+  <span>.srt</span>
+  <button id="save" class="primary" title="Ctrl+S">保存</button>
+  <span id="dirty"></span>
+  <span class="files" id="files"></span>
+</header>
+<div class="bar">
+  <button id="play" title="Space">▶ 再生</button>
+  <span id="clock">00:00.00 / 00:00.00</span>
+  <button id="setStart" title="[">[ 開始をここに</button>
+  <button id="setEnd" title="]">終了をここに ]</button>
+  <button id="undo" title="Ctrl+Z">元に戻す</button>
+  <label>拡大 <input id="zoom" type="range" min="15" max="400" value="80"></label>
+  <label><input id="follow" type="checkbox" checked> 再生位置を追う</label>
+  <label id="waveSel" hidden>波形 <select id="waveSrc"><option value="stem">ステム</option><option value="mix">本編</option></select></label>
+  <span id="status"></span>
+</div>
+<div id="tl"><div id="spacer"></div><canvas id="cv"></canvas></div>
+<div id="list"><table><thead><tr><th>#</th><th>開始</th><th>終了</th><th>長さ</th><th>歌詞</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="help">
+  <kbd>Space</kbd> 再生/停止　<kbd>[</kbd> <kbd>]</kbd> 選択行の開始/終了を再生位置に　<kbd>↑</kbd><kbd>↓</kbd> 行の移動
+  　<kbd>Enter</kbd> 選択行の頭から再生　ダブルクリックで歌詞を編集（<kbd>Enter</kbd> 確定 / <kbd>Esc</kbd> 取消）
+  　波形：クリックで移動、字幕の端をドラッグで伸縮、中ほどをドラッグで移動　<kbd>Ctrl+Z</kbd> 元に戻す　<kbd>Ctrl+S</kbd> 保存
+  　<span style="color:var(--warn)">橙</span>＝5秒超・前の行と重なり
+</div>
+<div id="loading">読み込み中…</div>
+
+<script>
+const MIN_DUR = 0.1, PEAK_RATE = 200, LONG = 5.0, EDGE_PX = 6, RULER = 18, LANE = 34;
+const $ = id => document.getElementById(id);
+const audio = new Audio();
+let cues = [], sel = -1, dur = 0, peaks = null, pps = 80, dirty = false, history = [], editing = null, drag = null;
+
+// ---- 時刻 ----
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+function fmtSrt(t) {
+  const ms = Math.round(Math.max(0, t) * 1000);
+  return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)},${pad(ms % 1000, 3)}`;
+}
+function fmtShort(t) {
+  const cs = Math.round(Math.max(0, t) * 100);
+  return `${pad(Math.floor(cs / 6000))}:${pad(Math.floor(cs / 100) % 60)}.${pad(cs % 100)}`;
+}
+function parseTs(s) {
+  const m = s.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+  return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4].padEnd(3, '0').slice(0, 3)) / 1000 : 0;
+}
+const r3 = x => Math.round(x * 1000) / 1000;
+
+// ---- SRT ----
+function parseSrt(text) {
+  const out = [];
+  for (const block of text.replace(/\r\n/g, '\n').trim().split(/\n\s*\n/)) {
+    const lines = block.split('\n');
+    const i = lines.findIndex(l => l.includes('-->'));
+    if (i < 0) continue;
+    const [a, b] = lines[i].split('-->');
+    out.push({ start: parseTs(a), end: parseTs(b), text: lines.slice(i + 1).join('\n').trim() });
+  }
+  return out;
+}
+function buildSrt() {
+  return cues.filter(c => c.text.trim()).map((c, i) => {
+    const s = Math.max(0, c.start), e = c.end > s ? c.end : s + 0.5;
+    return `${i + 1}\n${fmtSrt(s)} --> ${fmtSrt(e)}\n${c.text.trim()}\n`;
+  }).join('\n');
+}
+
+// ---- 変更の記録 ----
+function snapshot() {
+  history.push(JSON.stringify(cues));
+  if (history.length > 200) history.shift();
+}
+function markDirty() { dirty = true; $('dirty').textContent = '● 未保存'; }
+function undo() {
+  if (!history.length) return status('これ以上戻せません');
+  cues = JSON.parse(history.pop());
+  if (sel >= cues.length) sel = cues.length - 1;
+  markDirty(); renderRows(); draw(); status('元に戻しました');
+}
+function status(msg, err) { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; }
+
+// ---- 一覧 ----
+function renderRows() {
+  const tb = $('rows'); tb.innerHTML = '';
+  cues.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    const len = c.end - c.start, overlap = i > 0 && c.start < cues[i - 1].end - 0.0005;
+    tr.innerHTML = `<td class="t n">${i + 1}</td><td class="t ${overlap ? 'bad' : ''}">${fmtShort(c.start)}</td>`
+      + `<td class="t">${fmtShort(c.end)}</td><td class="t ${len > LONG ? 'long' : ''}">${len.toFixed(2)}</td><td class="txt"></td>`;
+    tr.lastChild.textContent = c.text;
+    if (i === sel) tr.classList.add('sel');
+    tr.addEventListener('click', () => { if (editing) return; select(i, true); });
+    tr.addEventListener('dblclick', () => openEditor(i));
+    tb.appendChild(tr);
+  });
+  markNow(true);  // 書き換え後は一覧を動かさない
+}
+function select(i, seek) {
+  if (i < 0 || i >= cues.length) return;
+  sel = i;
+  if (seek) audio.currentTime = cues[i].start;
+  document.querySelectorAll('#rows tr').forEach((tr, k) => tr.classList.toggle('sel', k === i));
+  const tr = $('rows').children[i]; if (tr) tr.scrollIntoView({ block: 'nearest' });
+  revealTime(cues[i].start); draw();
+}
+let lastNow = -1;
+function markNow(noScroll) {
+  const t = audio.currentTime;
+  const k = cues.findIndex(c => t >= c.start && t < c.end);
+  document.querySelectorAll('#rows tr').forEach((tr, i) => tr.classList.toggle('now', i === k));
+  // 再生中の行が変わったら、一覧をその行が中ほどに来るよう自動スクロール（「再生位置を追う」が有効なとき）
+  if (k !== lastNow) {
+    lastNow = k;
+    const tr = k >= 0 && $('rows').children[k];
+    if (tr && !noScroll && $('follow').checked && !editing) tr.scrollIntoView({ block: 'center', behavior: audio.paused ? 'auto' : 'smooth' });
+  }
+}
+
+// ---- 歌詞の編集（Enter 確定 / Esc 取消 / 外をクリックで確定）----
+function openEditor(i) {
+  if (editing) closeEditor(true);
+  select(i, false);
+  const td = $('rows').children[i].lastChild;
+  const inp = document.createElement('input');
+  inp.value = cues[i].text; td.textContent = ''; td.appendChild(inp);
+  editing = { i, inp };
+  inp.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); closeEditor(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeEditor(false); }
+  });
+  inp.addEventListener('blur', () => closeEditor(true));
+  inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+}
+function closeEditor(commit) {
+  const ed = editing; if (!ed) return; editing = null;
+  const v = ed.inp.value.trim();
+  if (commit && v !== cues[ed.i].text) { snapshot(); cues[ed.i].text = v; markDirty(); }
+  renderRows(); draw();
+}
+
+// ---- 開始・終了を再生位置に ----
+function setEdge(edge) {
+  if (sel < 0) return status('行を選択してください', true);
+  const c = cues[sel], t = Math.max(0, audio.currentTime);
+  snapshot();
+  if (edge === 'start') c.start = r3(Math.min(t, c.end - MIN_DUR));
+  else c.end = r3(Math.max(t, c.start + MIN_DUR));
+  status(edge === 'start' ? `開始 ${fmtShort(c.start)}` : `終了 ${fmtShort(c.end)}`);
+  markDirty(); renderRows(); draw();
+}
+
+// ---- 波形 ----
+function buildPeaks(buf) {
+  const n = Math.ceil(buf.duration * PEAK_RATE), step = buf.sampleRate / PEAK_RATE;
+  const mn = new Float32Array(n), mx = new Float32Array(n);
+  const chs = []; for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) chs.push(buf.getChannelData(c));
+  for (let i = 0; i < n; i++) {
+    let lo = 0, hi = 0; const a = Math.floor(i * step), b = Math.min(chs[0].length, Math.floor((i + 1) * step));
+    for (let j = a; j < b; j++) {
+      let v = 0; for (const ch of chs) v += ch[j]; v /= chs.length;
+      if (v < lo) lo = v; if (v > hi) hi = v;
+    }
+    mn[i] = lo; mx[i] = hi;
+  }
+  let peak = 0; for (let i = 0; i < n; i++) peak = Math.max(peak, -mn[i], mx[i]);
+  return { mn, mx, n, norm: peak > 0 ? 1 / peak : 1 };
+}
+const tl = $('tl'), cv = $('cv'), ctx = cv.getContext('2d');
+const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+function layout() {
+  $('spacer').style.width = Math.max(tl.clientWidth, dur * pps) + 'px';
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.width = tl.clientWidth + 'px'; cv.width = tl.clientWidth * dpr; cv.height = tl.clientHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+const xToT = x => (tl.scrollLeft + x) / pps;
+const tToX = t => t * pps - tl.scrollLeft;
+function draw() {
+  cv.style.left = tl.scrollLeft + 'px';
+  const W = tl.clientWidth, H = tl.clientHeight, waveTop = RULER, waveH = H - RULER - LANE, mid = waveTop + waveH / 2;
+  ctx.clearRect(0, 0, W, H);
+  // 字幕の範囲（波形の上に薄く）
+  cues.forEach((c, i) => {
+    const x0 = tToX(c.start), x1 = tToX(c.end); if (x1 < 0 || x0 > W) return;
+    ctx.fillStyle = i === sel ? css('--cue-sel') : css('--cue');
+    ctx.fillRect(x0, waveTop, x1 - x0, H - waveTop);
+  });
+  // 波形
+  if (peaks) {
+    ctx.fillStyle = css('--wave');
+    for (let x = 0; x < W; x++) {
+      const i0 = Math.floor(xToT(x) * PEAK_RATE), i1 = Math.max(i0 + 1, Math.floor(xToT(x + 1) * PEAK_RATE));
+      if (i0 >= peaks.n) break; if (i1 <= 0) continue;
+      let lo = 0, hi = 0;
+      for (let i = Math.max(0, i0); i < Math.min(peaks.n, i1); i++) { if (peaks.mn[i] < lo) lo = peaks.mn[i]; if (peaks.mx[i] > hi) hi = peaks.mx[i]; }
+      const y0 = mid - hi * peaks.norm * waveH / 2, y1 = mid - lo * peaks.norm * waveH / 2;
+      ctx.fillRect(x, y0, 1, Math.max(1, y1 - y0));
+    }
+  }
+  // 目盛り
+  ctx.fillStyle = '#0c0d1a'; ctx.fillRect(0, 0, W, RULER);
+  const stepS = pps >= 120 ? 1 : pps >= 40 ? 2 : pps >= 20 ? 5 : 10;
+  ctx.font = '10px Consolas, monospace'; ctx.textBaseline = 'top';
+  for (let s = Math.floor(xToT(0) / stepS) * stepS; s <= xToT(W); s += stepS) {
+    const x = Math.round(tToX(s)) + 0.5;
+    ctx.fillStyle = css('--line'); ctx.fillRect(x, RULER - 6, 1, 6);
+    ctx.fillStyle = css('--dim'); ctx.fillText(fmtShort(s).slice(0, 5), x + 3, 3);
+  }
+  // 字幕の帯（下段）と端の線
+  ctx.textBaseline = 'middle'; ctx.font = '12px "Noto Sans JP", "Yu Gothic UI", sans-serif';
+  cues.forEach((c, i) => {
+    const x0 = tToX(c.start), x1 = tToX(c.end); if (x1 < 0 || x0 > W) return;
+    const isSel = i === sel, edge = isSel ? css('--sel-edge') : css('--cue-edge');
+    ctx.fillStyle = isSel ? '#4a3a12' : '#14324a';
+    ctx.fillRect(x0, H - LANE + 2, Math.max(1, x1 - x0 - 1), LANE - 4);
+    ctx.fillStyle = edge; ctx.fillRect(x0, waveTop, isSel ? 2 : 1, H - waveTop); ctx.globalAlpha = .5;
+    ctx.fillRect(x1 - 1, waveTop, 1, H - waveTop); ctx.globalAlpha = 1;
+    ctx.save(); ctx.beginPath(); ctx.rect(x0 + 3, H - LANE, Math.max(0, x1 - x0 - 6), LANE); ctx.clip();
+    ctx.fillStyle = css('--text'); ctx.fillText(`${i + 1} ${c.text}`, x0 + 5, H - LANE / 2); ctx.restore();
+  });
+  // 再生位置
+  const px = tToX(audio.currentTime);
+  ctx.fillStyle = css('--play'); ctx.fillRect(Math.round(px), 0, 2, H);
+}
+function revealTime(t) {
+  const x = t * pps, W = tl.clientWidth;
+  if (x < tl.scrollLeft + 30 || x > tl.scrollLeft + W - 30) tl.scrollLeft = Math.max(0, x - W * 0.3);
+}
+
+// ---- 波形の操作：クリック＝移動、端ドラッグ＝伸縮、中ドラッグ＝移動 ----
+function hit(x) {
+  // 前の行の終了と次の行の開始が重なる位置では、選択中の行の端を優先する
+  const edges = [];
+  for (let i = 0; i < cues.length; i++) {
+    const x0 = tToX(cues[i].start), x1 = tToX(cues[i].end);
+    if (Math.abs(x - x0) <= EDGE_PX) edges.push({ i, part: 'start' });
+    if (Math.abs(x - x1) <= EDGE_PX) edges.push({ i, part: 'end' });
+  }
+  if (edges.length) return edges.find(h => h.i === sel) || edges[0];
+  for (let i = 0; i < cues.length; i++) {
+    const x0 = tToX(cues[i].start), x1 = tToX(cues[i].end);
+    if (x > x0 + EDGE_PX && x < x1 - EDGE_PX) return { i, part: 'body' };
+  }
+  return null;
+}
+cv.addEventListener('mousemove', e => {
+  if (drag) return;
+  const h = hit(e.offsetX), inLane = e.offsetY > tl.clientHeight - LANE;
+  cv.style.cursor = h && h.part !== 'body' ? 'ew-resize' : h && inLane ? 'grab' : 'default';
+});
+cv.addEventListener('mousedown', e => {
+  if (editing) closeEditor(true);
+  const x = e.offsetX, t = xToT(x), h = hit(x), inLane = e.offsetY > tl.clientHeight - LANE;
+  if (h && (h.part !== 'body' || inLane)) {
+    sel = h.i; select(h.i, false);
+    const c = cues[h.i];
+    drag = { ...h, t0: t, s0: c.start, e0: c.end, moved: false, snap: false };
+  } else {
+    audio.currentTime = Math.max(0, Math.min(dur, t));
+    const k = cues.findIndex(c => t >= c.start && t < c.end); if (k >= 0) select(k, false);
+    draw(); markNow(); updateClock();
+  }
+});
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const rect = cv.getBoundingClientRect(), t = xToT(e.clientX - rect.left), d = t - drag.t0, c = cues[drag.i];
+  if (!drag.moved && Math.abs(d * pps) < 2) return;
+  if (!drag.snap) { snapshot(); drag.snap = true; }
+  drag.moved = true;
+  if (drag.part === 'start') c.start = r3(Math.max(0, Math.min(drag.s0 + d, c.end - MIN_DUR)));
+  else if (drag.part === 'end') c.end = r3(Math.min(dur || 1e9, Math.max(drag.e0 + d, c.start + MIN_DUR)));
+  else { const dd = Math.max(-drag.s0, d); c.start = r3(drag.s0 + dd); c.end = r3(drag.e0 + dd); }
+  draw();
+});
+window.addEventListener('mouseup', () => {
+  if (!drag) return;
+  if (drag.moved) { markDirty(); renderRows(); }
+  else { audio.currentTime = cues[drag.i].start; updateClock(); }
+  drag = null; draw();
+});
+tl.addEventListener('scroll', draw);
+tl.addEventListener('wheel', e => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const t = xToT(e.offsetX);
+  const z = Math.max(15, Math.min(400, pps * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+  $('zoom').value = z; setZoom(z, t, e.offsetX);
+}, { passive: false });
+function setZoom(z, anchorT = audio.currentTime, anchorX = tl.clientWidth * 0.3) {
+  pps = +z; layout(); tl.scrollLeft = Math.max(0, anchorT * pps - anchorX); draw();
+}
+
+// ---- 再生 ----
+function togglePlay() { audio.paused ? audio.play() : audio.pause(); }
+function updateClock() { $('clock').textContent = `${fmtShort(audio.currentTime)} / ${fmtShort(dur)}`; }
+audio.addEventListener('play', () => { $('play').textContent = '❚❚ 停止'; tick(); });
+audio.addEventListener('pause', () => { $('play').textContent = '▶ 再生'; draw(); });
+function tick() {
+  updateClock(); markNow();
+  if ($('follow').checked && !drag) {
+    const x = audio.currentTime * pps, W = tl.clientWidth;
+    if (x > tl.scrollLeft + W * 0.85 || x < tl.scrollLeft) tl.scrollLeft = x - W * 0.15;
+  }
+  draw();
+  if (!audio.paused) requestAnimationFrame(tick);
+}
+
+// ---- 保存（作品名.srt を WAV と同じフォルダへ）----
+async function save(overwrite = false) {
+  if (editing) closeEditor(true);
+  const title = $('title').value.trim();
+  if (!title) { $('title').focus(); return status('作品名を入れてください', true); }
+  const r = await fetch('/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, text: buildSrt(), overwrite }) });
+  const j = await r.json();
+  if (r.status === 409) {
+    const msg = j.same ? `「${title}.srt」を上書き保存しますか？` : `「${title}.srt」は既にあります。上書きしますか？`;
+    if (confirm(msg)) return save(true);
+    return status('保存を取りやめました');
+  }
+  if (!r.ok) return status(j.error || '保存に失敗しました', true);
+  dirty = false; $('dirty').textContent = '';
+  $('files').textContent = filesLabel(j.name);
+  status(`保存しました：${j.path}`);
+}
+
+// ---- キー操作 ----
+document.addEventListener('keydown', e => {
+  if (editing) return;
+  if (e.target === $('title')) { if (e.key === 'Enter') { e.preventDefault(); $('title').blur(); } if (!(e.ctrlKey && e.key === 's')) return; }
+  if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return; }
+  if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+  if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  else if (e.key === '[') setEdge('start');
+  else if (e.key === ']') setEdge('end');
+  else if (e.key === 'ArrowDown') { e.preventDefault(); select(Math.min(cues.length - 1, sel + 1), true); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); select(Math.max(0, sel - 1), true); }
+  else if (e.key === 'Enter' && sel >= 0) { audio.currentTime = cues[sel].start; audio.play(); }
+});
+$('play').onclick = togglePlay;
+$('setStart').onclick = () => setEdge('start');
+$('setEnd').onclick = () => setEdge('end');
+$('undo').onclick = undo;
+$('save').onclick = () => save();
+$('zoom').oninput = e => setZoom(e.target.value);
+window.addEventListener('resize', layout);
+window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+// ---- 起動 ----
+// 再生は本編、波形はステム（あれば）。歌い出しは伴奏の無いステムの波形のほうが見つけやすい
+let info = {}, actx = null;
+const peakCache = {};
+const filesLabel = srt => `再生: ${info.wav}　／　波形: ${info.stem ? info.stem + '（切替で本編）' : info.wav}　／　SRT: ${srt || '（なし）'}`;
+async function loadPeaks(src, ab) {
+  if (peakCache[src]) return peakCache[src];
+  if (!ab) ab = await (await fetch(src === 'stem' ? '/api/stem' : '/api/audio')).arrayBuffer();
+  actx = actx || new AudioContext();
+  const buf = await actx.decodeAudioData(ab);
+  return (peakCache[src] = { peaks: buildPeaks(buf), dur: buf.duration });
+}
+async function showWave(src) {
+  status(src === 'stem' ? 'ステムの波形を読み込み中…' : '本編の波形を読み込み中…');
+  const p = await loadPeaks(src);
+  peaks = p.peaks; dur = Math.max(dur, p.dur);
+  layout(); status(src === 'stem' ? '波形：ステム' : '波形：本編');
+}
+$('waveSrc').onchange = e => showWave(e.target.value);
+audio.addEventListener('loadedmetadata', () => { if (audio.duration > dur) { dur = audio.duration; layout(); updateClock(); } });
+(async () => {
+  try {
+    info = await (await fetch('/api/info')).json();
+    $('title').value = info.title; document.title = `${info.title} - SRT エディタ`;
+    $('files').textContent = filesLabel(info.srt);
+    cues = parseSrt(await (await fetch('/api/srt')).text());
+    const ab = await (await fetch('/api/audio')).arrayBuffer();
+    audio.src = URL.createObjectURL(new Blob([ab], { type: 'audio/wav' }));
+    if (info.stem) {
+      $('waveSel').hidden = false;
+      const st = await loadPeaks('stem');
+      peaks = st.peaks; dur = st.dur;
+      loadPeaks('mix', ab).catch(() => {});  // 本編の波形は裏で用意しておく
+    } else {
+      const mx = await loadPeaks('mix', ab);
+      peaks = mx.peaks; dur = mx.dur;
+    }
+    $('loading').remove();
+    sel = cues.length ? 0 : -1;
+    renderRows(); layout(); updateClock();
+    status(`${cues.length} 行を読み込みました` + (info.stem ? '（波形：ステム）' : ''));
+  } catch (err) {
+    $('loading').textContent = '読み込みに失敗しました：' + err;
+  }
+})();
+</script>
+</body>
+</html>
